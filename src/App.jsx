@@ -37,19 +37,68 @@ const TOOLTIPS = {
 // ─── SHARED COMPONENTS ──────────────────────────────────────────────
 const Tooltip = ({ text, children, position = "top" }) => {
   const [show, setShow] = useState(false);
+  const [coords, setCoords] = useState({ x: 0, y: 0 });
+
+  const handleMouseEnter = (e) => {
+    setCoords({ x: e.clientX, y: e.clientY });
+    setShow(true);
+  };
+  const handleMouseMove = (e) => {
+    setCoords({ x: e.clientX, y: e.clientY });
+  };
+  const handleMouseLeave = () => setShow(false);
+
+  const TOOLTIP_WIDTH = 288;
+  const OFFSET = 12;
+
+  // Compute fixed position so the tooltip stays within the viewport
+  const getStyle = () => {
+    const vw = typeof window !== "undefined" ? window.innerWidth : 1200;
+    let left = coords.x - TOOLTIP_WIDTH / 2;
+    let top;
+
+    if (position === "bottom") {
+      top = coords.y + OFFSET;
+    } else {
+      // default to top; fall back to bottom if too close to top edge
+      top = coords.y - OFFSET - 10;
+      if (top < 8) top = coords.y + OFFSET;
+    }
+
+    // Clamp horizontally so it never overflows the viewport
+    if (left < 8) left = 8;
+    if (left + TOOLTIP_WIDTH > vw - 8) left = vw - TOOLTIP_WIDTH - 8;
+
+    return {
+      position: "fixed",
+      zIndex: 9999,
+      width: TOOLTIP_WIDTH,
+      padding: "12px 16px",
+      borderRadius: 12,
+      fontSize: 13,
+      lineHeight: 1.55,
+      boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+      background: "#1a1a2e",
+      color: "#e8dcc8",
+      border: "1.5px solid #f4a261",
+      fontFamily: "'DM Sans', sans-serif",
+      pointerEvents: "none",
+      top,
+      left,
+      transform: position === "top" ? "translateY(-100%)" : "none",
+    };
+  };
+
   return (
-    <span style={{ position: "relative", display: "inline-block" }} onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
+    <span
+      style={{ position: "relative", display: "inline-block" }}
+      onMouseEnter={handleMouseEnter}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+    >
       {children}
       {show && (
-        <span style={{
-          position: "absolute", zIndex: 50, width: 288, padding: "12px 16px", borderRadius: 12,
-          fontSize: 13, lineHeight: 1.55, boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
-          background: "#1a1a2e", color: "#e8dcc8", border: "1.5px solid #f4a261",
-          fontFamily: "'DM Sans', sans-serif", pointerEvents: "none",
-          ...(position === "top" ? { bottom: "100%", marginBottom: 8, left: "50%", transform: "translateX(-50%)" }
-            : position === "bottom" ? { top: "100%", marginTop: 8, left: "50%", transform: "translateX(-50%)" }
-            : { top: 0, left: "100%", marginLeft: 8 }),
-        }}>
+        <span style={getStyle()}>
           <span style={{ color: "#f4a261", fontWeight: 700 }}>Real-world story: </span>{text}
         </span>
       )}

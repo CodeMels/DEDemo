@@ -38,6 +38,19 @@ const TOOLTIPS = {
 const Tooltip = ({ text, children, position = "top" }) => {
   const [show, setShow] = useState(false);
   const [coords, setCoords] = useState({ x: 0, y: 0 });
+  const wrapperRef = useRef(null);
+
+  // Dismiss tooltip when tapping outside on mobile
+  useEffect(() => {
+    if (!show) return;
+    const dismiss = (e) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        setShow(false);
+      }
+    };
+    document.addEventListener("touchstart", dismiss, { passive: true });
+    return () => document.removeEventListener("touchstart", dismiss);
+  }, [show]);
 
   const handleMouseEnter = (e) => {
     setCoords({ x: e.clientX, y: e.clientY });
@@ -47,6 +60,13 @@ const Tooltip = ({ text, children, position = "top" }) => {
     setCoords({ x: e.clientX, y: e.clientY });
   };
   const handleMouseLeave = () => setShow(false);
+
+  const handleTouchStart = (e) => {
+    e.preventDefault(); // prevent ghost-click mouse events
+    const touch = e.touches[0];
+    setCoords({ x: touch.clientX, y: touch.clientY });
+    setShow((prev) => !prev);
+  };
 
   const TOOLTIP_WIDTH = 288;
   const OFFSET = 12;
@@ -92,10 +112,12 @@ const Tooltip = ({ text, children, position = "top" }) => {
 
   return (
     <span
+      ref={wrapperRef}
       style={{ position: "relative", display: "inline-block" }}
       onMouseEnter={handleMouseEnter}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
+      onTouchStart={handleTouchStart}
     >
       {children}
       {show && (

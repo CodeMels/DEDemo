@@ -196,15 +196,21 @@ const Stage1 = ({ onComplete }) => {
     ["Receive Goods", "Process Payment", "Create PO", "Record Invoice", "Approve PO"].sort(() => Math.random() - 0.5)
   );
   const [dragItem, setDragItem] = useState(null);
+  const [selectedItem, setSelectedItem] = useState(null); // tap-to-place (mobile)
   const [correct, setCorrect] = useState(false);
   const [checked, setChecked] = useState(false);
 
-  const handleDrop = (idx) => {
-    if (!dragItem || slots[idx]) return;
-    setSlots(s => { const n = [...s]; n[idx] = dragItem; return n; });
-    setAvailable(a => a.filter(x => x !== dragItem));
-    setDragItem(null);
+  const placeItem = (item, idx) => {
+    if (slots[idx]) return;
+    setSlots(s => { const n = [...s]; n[idx] = item; return n; });
+    setAvailable(a => a.filter(x => x !== item));
     setChecked(false);
+  };
+
+  const handleDrop = (idx) => {
+    if (!dragItem) return;
+    placeItem(dragItem, idx);
+    setDragItem(null);
   };
 
   const handleRemove = (idx) => {
@@ -212,6 +218,15 @@ const Stage1 = ({ onComplete }) => {
     setAvailable(a => [...a, slots[idx]]);
     setSlots(s => { const n = [...s]; n[idx] = null; return n; });
     setChecked(false);
+  };
+
+  const handleSlotClick = (idx) => {
+    if (slots[idx]) { handleRemove(idx); return; }
+    if (selectedItem) { placeItem(selectedItem, idx); setSelectedItem(null); }
+  };
+
+  const handleItemTap = (item) => {
+    setSelectedItem(prev => prev === item ? null : item);
   };
 
   const checkOrder = () => {
@@ -257,15 +272,17 @@ const Stage1 = ({ onComplete }) => {
         <InfoDot tip={TOOLTIPS.process_build} />
       </h2>
       <p style={introStyle}>
-        Drag the activities into the correct order — from start to finish.
+        Drag — or tap an activity then tap a slot — to place them in the correct order.
       </p>
 
       <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap", marginBottom: 32 }}>
         {available.map(item => (
           <div key={item} draggable onDragStart={() => setDragItem(item)}
+            onClick={() => handleItemTap(item)}
             style={{
               padding: "10px 18px", borderRadius: 10, cursor: "grab",
-              background: "#2a2a4a", border: "2px solid #f4a261", color: "#f4a261",
+              background: selectedItem === item ? "rgba(244,162,97,0.25)" : "#2a2a4a",
+              border: `2px solid ${selectedItem === item ? "#e8dcc8" : "#f4a261"}`, color: "#f4a261",
               fontFamily: "'DM Mono', monospace", fontSize: 14, fontWeight: 600,
               userSelect: "none",
             }}>{item}</div>
@@ -277,7 +294,7 @@ const Stage1 = ({ onComplete }) => {
         {slots.map((slot, i) => (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <div
-              onDragOver={e => e.preventDefault()} onDrop={() => handleDrop(i)} onClick={() => handleRemove(i)}
+              onDragOver={e => e.preventDefault()} onDrop={() => handleDrop(i)} onClick={() => handleSlotClick(i)}
               style={{
                 width: 155, height: 52, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center",
                 border: `2px dashed ${slot ? (checked ? (slot === CORRECT_ORDER[i] ? "#2ecc71" : "#e74c3c") : "#f4a261") : "#5a5a7a"}`,

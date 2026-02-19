@@ -427,16 +427,20 @@ const Stage2 = ({ onComplete, stats }) => {
                   const hasIssue = isIssueCell(activeSystem, ri, ci);
                   const wasFound = isFound(activeSystem, ri, ci);
                   const tip = getIssueTip(activeSystem, ri, ci);
-                  const inner = (
+                  const cellContent = cell || <span style={{ color: "#e74c3c", fontStyle: "italic" }}>NULL</span>;
+                  return (
                     <td key={ci} onClick={() => handleCellClick(activeSystem, ri, ci)} style={{
                       padding: "8px 10px", borderBottom: "1px solid #2a2a4a", whiteSpace: "nowrap",
                       color: wasFound ? "#f4a261" : hasIssue ? "#e8dcc8" : "#7a7a9a",
                       background: wasFound ? "rgba(244,162,97,0.08)" : hasIssue ? "rgba(244,162,97,0.03)" : "transparent",
                       cursor: hasIssue ? "pointer" : "default",
                       textDecoration: wasFound ? "underline wavy #f4a261" : "none",
-                    }}>{cell || <span style={{ color: "#e74c3c", fontStyle: "italic" }}>NULL</span>}</td>
+                    }}>
+                      {wasFound && tip
+                        ? <Tooltip text={tip} position="bottom"><span>{cellContent}</span></Tooltip>
+                        : cellContent}
+                    </td>
                   );
-                  return wasFound && tip ? <Tooltip key={ci} text={tip} position="bottom">{inner}</Tooltip> : inner;
                 })}</tr>
               ))}
             </tbody>

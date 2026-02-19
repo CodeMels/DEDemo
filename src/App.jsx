@@ -83,6 +83,7 @@ const Tooltip = ({ text, children, position = "top" }) => {
       border: "1.5px solid #f4a261",
       fontFamily: "'DM Sans', sans-serif",
       pointerEvents: "none",
+      whiteSpace: "normal",
       top,
       left,
       transform: position === "top" ? "translateY(-100%)" : "none",

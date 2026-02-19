@@ -1657,6 +1657,13 @@ export default function App() {
         {stage === 6 && <Stage6 onComplete={() => setStage(7)} />}
         {stage === 7 && <Stage7 stats={stats} />}
       </div>
+
+      {/* Footer */}
+      <div style={{ textAlign: "center", paddingBottom: 20 }}>
+        <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#2e2e4a", letterSpacing: 0.4 }}>
+          made by Mels van Gameren
+        </span>
+      </div>
     </div>
   );
 }

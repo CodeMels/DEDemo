@@ -37,19 +37,91 @@ const TOOLTIPS = {
 // ─── SHARED COMPONENTS ──────────────────────────────────────────────
 const Tooltip = ({ text, children, position = "top" }) => {
   const [show, setShow] = useState(false);
+  const [coords, setCoords] = useState({ x: 0, y: 0 });
+  const wrapperRef = useRef(null);
+
+  // Dismiss tooltip when tapping outside on mobile
+  useEffect(() => {
+    if (!show) return;
+    const dismiss = (e) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        setShow(false);
+      }
+    };
+    document.addEventListener("touchstart", dismiss, { passive: true });
+    return () => document.removeEventListener("touchstart", dismiss);
+  }, [show]);
+
+  const handleMouseEnter = (e) => {
+    setCoords({ x: e.clientX, y: e.clientY });
+    setShow(true);
+  };
+  const handleMouseMove = (e) => {
+    setCoords({ x: e.clientX, y: e.clientY });
+  };
+  const handleMouseLeave = () => setShow(false);
+
+  const handleTouchStart = (e) => {
+    e.preventDefault(); // prevent ghost-click mouse events
+    const touch = e.touches[0];
+    setCoords({ x: touch.clientX, y: touch.clientY });
+    setShow((prev) => !prev);
+  };
+
+  const TOOLTIP_WIDTH = 288;
+  const OFFSET = 12;
+
+  // Compute fixed position so the tooltip stays within the viewport
+  const getStyle = () => {
+    const vw = typeof window !== "undefined" ? window.innerWidth : 1200;
+    let left = coords.x - TOOLTIP_WIDTH / 2;
+    let top;
+
+    if (position === "bottom") {
+      top = coords.y + OFFSET;
+    } else {
+      // default to top; fall back to bottom if too close to top edge
+      top = coords.y - OFFSET - 10;
+      if (top < 8) top = coords.y + OFFSET;
+    }
+
+    // Clamp horizontally so it never overflows the viewport
+    if (left < 8) left = 8;
+    if (left + TOOLTIP_WIDTH > vw - 8) left = vw - TOOLTIP_WIDTH - 8;
+
+    return {
+      position: "fixed",
+      zIndex: 9999,
+      width: TOOLTIP_WIDTH,
+      padding: "12px 16px",
+      borderRadius: 12,
+      fontSize: 13,
+      lineHeight: 1.55,
+      boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+      background: "#1a1a2e",
+      color: "#e8dcc8",
+      border: "1.5px solid #f4a261",
+      fontFamily: "'DM Sans', sans-serif",
+      pointerEvents: "none",
+      whiteSpace: "normal",
+      top,
+      left,
+      transform: position === "top" ? "translateY(-100%)" : "none",
+    };
+  };
+
   return (
-    <span style={{ position: "relative", display: "inline-block" }} onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
+    <span
+      ref={wrapperRef}
+      style={{ position: "relative", display: "inline-block" }}
+      onMouseEnter={handleMouseEnter}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+      onTouchStart={handleTouchStart}
+    >
       {children}
       {show && (
-        <span style={{
-          position: "absolute", zIndex: 50, width: 288, padding: "12px 16px", borderRadius: 12,
-          fontSize: 13, lineHeight: 1.55, boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
-          background: "#1a1a2e", color: "#e8dcc8", border: "1.5px solid #f4a261",
-          fontFamily: "'DM Sans', sans-serif", pointerEvents: "none",
-          ...(position === "top" ? { bottom: "100%", marginBottom: 8, left: "50%", transform: "translateX(-50%)" }
-            : position === "bottom" ? { top: "100%", marginTop: 8, left: "50%", transform: "translateX(-50%)" }
-            : { top: 0, left: "100%", marginLeft: 8 }),
-        }}>
+        <span style={getStyle()}>
           <span style={{ color: "#f4a261", fontWeight: 700 }}>Real-world story: </span>{text}
         </span>
       )}
@@ -124,15 +196,21 @@ const Stage1 = ({ onComplete }) => {
     ["Receive Goods", "Process Payment", "Create PO", "Record Invoice", "Approve PO"].sort(() => Math.random() - 0.5)
   );
   const [dragItem, setDragItem] = useState(null);
+  const [selectedItem, setSelectedItem] = useState(null); // tap-to-place (mobile)
   const [correct, setCorrect] = useState(false);
   const [checked, setChecked] = useState(false);
 
-  const handleDrop = (idx) => {
-    if (!dragItem || slots[idx]) return;
-    setSlots(s => { const n = [...s]; n[idx] = dragItem; return n; });
-    setAvailable(a => a.filter(x => x !== dragItem));
-    setDragItem(null);
+  const placeItem = (item, idx) => {
+    if (slots[idx]) return;
+    setSlots(s => { const n = [...s]; n[idx] = item; return n; });
+    setAvailable(a => a.filter(x => x !== item));
     setChecked(false);
+  };
+
+  const handleDrop = (idx) => {
+    if (!dragItem) return;
+    placeItem(dragItem, idx);
+    setDragItem(null);
   };
 
   const handleRemove = (idx) => {
@@ -140,6 +218,15 @@ const Stage1 = ({ onComplete }) => {
     setAvailable(a => [...a, slots[idx]]);
     setSlots(s => { const n = [...s]; n[idx] = null; return n; });
     setChecked(false);
+  };
+
+  const handleSlotClick = (idx) => {
+    if (slots[idx]) { handleRemove(idx); return; }
+    if (selectedItem) { placeItem(selectedItem, idx); setSelectedItem(null); }
+  };
+
+  const handleItemTap = (item) => {
+    setSelectedItem(prev => prev === item ? null : item);
   };
 
   const checkOrder = () => {
@@ -185,15 +272,17 @@ const Stage1 = ({ onComplete }) => {
         <InfoDot tip={TOOLTIPS.process_build} />
       </h2>
       <p style={introStyle}>
-        Drag the activities into the correct order — from start to finish.
+        Drag — or tap an activity then tap a slot — to place them in the correct order.
       </p>
 
       <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap", marginBottom: 32 }}>
         {available.map(item => (
           <div key={item} draggable onDragStart={() => setDragItem(item)}
+            onClick={() => handleItemTap(item)}
             style={{
               padding: "10px 18px", borderRadius: 10, cursor: "grab",
-              background: "#2a2a4a", border: "2px solid #f4a261", color: "#f4a261",
+              background: selectedItem === item ? "rgba(244,162,97,0.25)" : "#2a2a4a",
+              border: `2px solid ${selectedItem === item ? "#e8dcc8" : "#f4a261"}`, color: "#f4a261",
               fontFamily: "'DM Mono', monospace", fontSize: 14, fontWeight: 600,
               userSelect: "none",
             }}>{item}</div>
@@ -205,7 +294,7 @@ const Stage1 = ({ onComplete }) => {
         {slots.map((slot, i) => (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <div
-              onDragOver={e => e.preventDefault()} onDrop={() => handleDrop(i)} onClick={() => handleRemove(i)}
+              onDragOver={e => e.preventDefault()} onDrop={() => handleDrop(i)} onClick={() => handleSlotClick(i)}
               style={{
                 width: 155, height: 52, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center",
                 border: `2px dashed ${slot ? (checked ? (slot === CORRECT_ORDER[i] ? "#2ecc71" : "#e74c3c") : "#f4a261") : "#5a5a7a"}`,
@@ -378,16 +467,20 @@ const Stage2 = ({ onComplete, stats }) => {
                   const hasIssue = isIssueCell(activeSystem, ri, ci);
                   const wasFound = isFound(activeSystem, ri, ci);
                   const tip = getIssueTip(activeSystem, ri, ci);
-                  const inner = (
+                  const cellContent = cell || <span style={{ color: "#e74c3c", fontStyle: "italic" }}>NULL</span>;
+                  return (
                     <td key={ci} onClick={() => handleCellClick(activeSystem, ri, ci)} style={{
                       padding: "8px 10px", borderBottom: "1px solid #2a2a4a", whiteSpace: "nowrap",
                       color: wasFound ? "#f4a261" : hasIssue ? "#e8dcc8" : "#7a7a9a",
                       background: wasFound ? "rgba(244,162,97,0.08)" : hasIssue ? "rgba(244,162,97,0.03)" : "transparent",
                       cursor: hasIssue ? "pointer" : "default",
                       textDecoration: wasFound ? "underline wavy #f4a261" : "none",
-                    }}>{cell || <span style={{ color: "#e74c3c", fontStyle: "italic" }}>NULL</span>}</td>
+                    }}>
+                      {wasFound && tip
+                        ? <Tooltip text={tip} position="bottom"><span>{cellContent}</span></Tooltip>
+                        : cellContent}
+                    </td>
                   );
-                  return wasFound && tip ? <Tooltip key={ci} text={tip} position="bottom">{inner}</Tooltip> : inner;
                 })}</tr>
               ))}
             </tbody>
@@ -1580,6 +1673,13 @@ export default function App() {
         {stage === 5 && <Stage5 onComplete={() => setStage(6)} />}
         {stage === 6 && <Stage6 onComplete={() => setStage(7)} />}
         {stage === 7 && <Stage7 stats={stats} />}
+      </div>
+
+      {/* Footer */}
+      <div style={{ textAlign: "center", paddingBottom: 20 }}>
+        <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#2e2e4a", letterSpacing: 0.4 }}>
+          made by Mels van Gameren
+        </span>
       </div>
     </div>
   );

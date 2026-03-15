@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 
 // ─── CONSTANTS ──────────────────────────────────────────────────────
 const STAGES = [
@@ -1519,17 +1519,149 @@ const introStyle = { color: "#a89b8c", textAlign: "center", fontFamily: "'DM San
 const codeInline = { fontFamily: "'DM Mono', monospace", fontSize: 13, background: "rgba(244,162,97,0.1)", color: "#f4a261", padding: "1px 6px", borderRadius: 4 };
 
 // ═══════════════════════════════════════════════════════════════════
+// DATA FLOW ANIMATION — plays between stage transitions
+// ═══════════════════════════════════════════════════════════════════
+const PIPELINE_NODES = [
+  { icon: "🗄️", label: "Source Systems", sub: "ERP · Excel · Email", color: "#e76f51" },
+  { icon: "📋", label: "Event Log",       sub: "Case · Activity · Time", color: "#f4a261" },
+  { icon: "⚙️",  label: "Transform",      sub: "ETL · Map · Validate", color: "#2a9d8f" },
+  { icon: "📊", label: "Dashboard",       sub: "KPIs · Flow · Insights", color: "#a8d8ea" },
+];
+
+const TRANSITION_MESSAGES = {
+  1: "Identifying data sources...",
+  2: "Extracting records from source systems...",
+  3: "Building the event log...",
+  4: "Applying transformations & mappings...",
+  5: "Computing KPIs...",
+  6: "Validating data quality...",
+};
+
+const DataFlowAnimation = ({ fromStage, onDone }) => {
+  useEffect(() => {
+    const t = setTimeout(onDone, 2800);
+    return () => clearTimeout(t);
+  }, [onDone]);
+
+  // Which node index is currently "active" (glowing), 0-indexed
+  const activeNode = Math.min(fromStage - 1, PIPELINE_NODES.length - 1);
+  const message = TRANSITION_MESSAGES[fromStage] || "Processing...";
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "#0d0d1a", zIndex: 100,
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      animation: "fadeIn 0.35s ease",
+    }}>
+      <p style={{
+        color: "#5a5a7a", fontFamily: "'DM Mono', monospace", fontSize: 12,
+        letterSpacing: 2, textTransform: "uppercase", marginBottom: 52,
+      }}>
+        {message}
+      </p>
+
+      {/* Pipeline row */}
+      <div style={{ display: "flex", alignItems: "center", maxWidth: 680, width: "100%", padding: "0 24px" }}>
+        {PIPELINE_NODES.map((node, i) => (
+          <React.Fragment key={node.label}>
+            {/* Node box */}
+            <div style={{
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+              animation: `pipelineFadeIn 0.45s ease ${i * 0.12}s both`,
+              flexShrink: 0,
+            }}>
+              <div style={{
+                width: 72, height: 72, borderRadius: 14,
+                background: i <= activeNode ? `${node.color}18` : "#161625",
+                border: `2px solid ${i <= activeNode ? node.color : "#252540"}`,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 26,
+                animation: i === activeNode ? "nodeGlow 1.6s ease-in-out infinite" : "none",
+                boxShadow: i === activeNode ? `0 0 18px ${node.color}55` : "none",
+                transition: "border-color 0.5s, background 0.5s",
+              }}>
+                {node.icon}
+              </div>
+              <span style={{
+                fontFamily: "'DM Mono', monospace", fontSize: 9, fontWeight: 700,
+                color: i <= activeNode ? node.color : "#333355",
+                textAlign: "center", letterSpacing: 0.5,
+              }}>{node.label}</span>
+              <span style={{
+                fontFamily: "'DM Sans', sans-serif", fontSize: 9,
+                color: "#363650", textAlign: "center",
+              }}>{node.sub}</span>
+            </div>
+
+            {/* Connector with animated particles */}
+            {i < PIPELINE_NODES.length - 1 && (
+              <div style={{
+                flex: 1, height: 2, position: "relative", marginBottom: 38,
+                background: i < activeNode
+                  ? `linear-gradient(90deg, ${PIPELINE_NODES[i].color}, ${PIPELINE_NODES[i + 1].color})`
+                  : "#1e1e38",
+                overflow: "hidden",
+                transition: "background 0.6s ease",
+              }}>
+                {/* Particles flow on the edge just before the active node */}
+                {i === activeNode - 1 && [0, 1, 2].map(p => (
+                  <div key={p} style={{
+                    position: "absolute", top: "50%", transform: "translateY(-50%)",
+                    width: 7, height: 7, borderRadius: "50%",
+                    background: PIPELINE_NODES[i + 1].color,
+                    boxShadow: `0 0 8px ${PIPELINE_NODES[i + 1].color}`,
+                    animation: `flowRight 1.3s linear ${p * 0.43}s infinite`,
+                  }} />
+                ))}
+              </div>
+            )}
+          </React.Fragment>
+        ))}
+      </div>
+
+      <button onClick={onDone} style={{
+        marginTop: 52, padding: "7px 18px", background: "transparent",
+        border: "1px solid #252540", borderRadius: 7, color: "#444466",
+        fontFamily: "'DM Mono', monospace", fontSize: 11, cursor: "pointer",
+        letterSpacing: 1, transition: "color 0.2s, border-color 0.2s",
+      }}
+        onMouseEnter={e => { e.currentTarget.style.color = "#f4a261"; e.currentTarget.style.borderColor = "#f4a261"; }}
+        onMouseLeave={e => { e.currentTarget.style.color = "#444466"; e.currentTarget.style.borderColor = "#252540"; }}
+      >
+        SKIP →
+      </button>
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════════
 export default function App() {
   const [stage, setStage] = useState(1);
+  const [animating, setAnimating] = useState(false);
+  const [nextStage, setNextStage] = useState(null);
   const stats = useRef({ issuesFound: 0, extractionAttempts: 0, caseIdFirstTry: false });
+
+  const advanceStage = useCallback((n) => {
+    setNextStage(n);
+    setAnimating(true);
+  }, []);
+
+  const handleAnimDone = useCallback(() => {
+    setStage(s => nextStage ?? s + 1);
+    setAnimating(false);
+    setNextStage(null);
+  }, [nextStage]);
 
   return (
     <div style={{ minHeight: "100vh", background: "#12121f", fontFamily: "'DM Sans', sans-serif", padding: "0 16px" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,500;0,700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
         @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pipelineFadeIn { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes nodeGlow { 0%, 100% { box-shadow: 0 0 8px rgba(244,162,97,0.15); } 50% { box-shadow: 0 0 24px rgba(244,162,97,0.55); } }
+        @keyframes flowRight { from { left: -8px; opacity: 0.9; } to { left: 100%; opacity: 0.4; } }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         button:hover { opacity: 0.88; }
         select { outline: none; }
@@ -1571,14 +1703,17 @@ export default function App() {
         ))}
       </div>
 
+      {/* Data flow transition overlay */}
+      {animating && <DataFlowAnimation fromStage={stage} onDone={handleAnimDone} />}
+
       {/* Content */}
       <div style={{ maxWidth: 780, margin: "0 auto", paddingBottom: 48, animation: "fadeIn 0.4s ease" }} key={stage}>
-        {stage === 1 && <Stage1 onComplete={() => setStage(2)} />}
-        {stage === 2 && <Stage2 onComplete={() => setStage(3)} stats={stats} />}
-        {stage === 3 && <Stage3 onComplete={() => setStage(4)} stats={stats} />}
-        {stage === 4 && <Stage4 onComplete={() => setStage(5)} stats={stats} />}
-        {stage === 5 && <Stage5 onComplete={() => setStage(6)} />}
-        {stage === 6 && <Stage6 onComplete={() => setStage(7)} />}
+        {stage === 1 && <Stage1 onComplete={() => advanceStage(2)} />}
+        {stage === 2 && <Stage2 onComplete={() => advanceStage(3)} stats={stats} />}
+        {stage === 3 && <Stage3 onComplete={() => advanceStage(4)} stats={stats} />}
+        {stage === 4 && <Stage4 onComplete={() => advanceStage(5)} stats={stats} />}
+        {stage === 5 && <Stage5 onComplete={() => advanceStage(6)} />}
+        {stage === 6 && <Stage6 onComplete={() => advanceStage(7)} />}
         {stage === 7 && <Stage7 stats={stats} />}
       </div>
     </div>

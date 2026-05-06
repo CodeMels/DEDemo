@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 
 // ─── CONSTANTS ──────────────────────────────────────────────────────
 const STAGES = [
@@ -8,7 +8,8 @@ const STAGES = [
   { id: 4, title: "The Transformation", subtitle: "Write the ETL" },
   { id: 5, title: "The KPIs", subtitle: "Code the metrics" },
   { id: 6, title: "Quality Check", subtitle: "Break things" },
-  { id: 7, title: "The Dashboard", subtitle: "The reveal" },
+  { id: 7, title: "The Detective", subtitle: "Find the bugs" },
+  { id: 8, title: "The Dashboard", subtitle: "The reveal" },
 ];
 
 const CORRECT_ORDER = ["Create PO", "Approve PO", "Receive Goods", "Record Invoice", "Process Payment"];
@@ -1425,9 +1426,9 @@ const Stage6 = ({ onComplete }) => {
 };
 
 // ═══════════════════════════════════════════════════════════════════
-// STAGE 7 — THE DASHBOARD REVEAL
+// STAGE 8 — THE DASHBOARD REVEAL
 // ═══════════════════════════════════════════════════════════════════
-const Stage7 = ({ stats }) => {
+const Stage8 = ({ stats }) => {
   const [revealed, setRevealed] = useState(false);
   useEffect(() => { const t = setTimeout(() => setRevealed(true), 600); return () => clearTimeout(t); }, []);
 
@@ -1499,6 +1500,7 @@ const Stage7 = ({ stats }) => {
           <div>Data issues discovered: <strong style={{ color: "#f4a261" }}>{stats.current.issuesFound || 0}</strong> / 11</div>
           <div>Extraction attempts: <strong style={{ color: "#f4a261" }}>{stats.current.extractionAttempts || "—"}</strong></div>
           <div>Case ID on first try: <strong style={{ color: stats.current.caseIdFirstTry ? "#2ecc71" : "#e76f51" }}>{stats.current.caseIdFirstTry ? "Yes!" : "Needed a few tries"}</strong></div>
+          <div>Detective bugs found: <strong style={{ color: (stats.current.detectiveBugsFound || 0) === 3 ? "#2ecc71" : "#f4a261" }}>{stats.current.detectiveBugsFound || 0}</strong> / 3</div>
         </div>
       </div>
 
@@ -1513,23 +1515,333 @@ const Stage7 = ({ stats }) => {
   );
 };
 
+// ═══════════════════════════════════════════════════════════════════
+// STAGE 7 — THE DETECTIVE
+// ═══════════════════════════════════════════════════════════════════
+const BUGGY_LOG = [
+  { key: "r1",  caseid: "PO-1001",  activity: "Create PO",       ts: "2024-01-15 08:32", src: "SAP-MM", bug: null },
+  { key: "r2",  caseid: "PO-1001",  activity: "Approve PO",      ts: "2024-01-15 10:14", src: "SAP-MM", bug: null },
+  { key: "r3",  caseid: "INV-8842", activity: "Record Invoice",  ts: "2024-01-16 09:00", src: "SAP-FI", bug: { type: "wrong-caseid", col: "caseid" } },
+  { key: "r4",  caseid: "PO-1001",  activity: "Receive Goods",   ts: "2024-01-16 14:22", src: "WMS",    bug: null },
+  { key: "r5",  caseid: "PO-1001",  activity: "FRGZU_08",        ts: "2024-01-17 11:05", src: "SAP-MM", bug: { type: "unmapped", col: "activity" } },
+  { key: "r6",  caseid: "PO-1001",  activity: "Process Payment", ts: "2024-01-17 13:47", src: "SAP-FI", bug: null },
+  { key: "r7",  caseid: "PO-1002",  activity: "Create PO",       ts: "2024-01-18 09:15", src: "SAP-MM", bug: null },
+  { key: "r8",  caseid: "PO-1002",  activity: "Approve PO",      ts: "2024-01-18 16:33", src: "SAP-MM", bug: null },
+  { key: "r9",  caseid: "INV-9103", activity: "Record Invoice",  ts: "2024-01-19 08:20", src: "SAP-FI", bug: { type: "wrong-caseid", col: "caseid" } },
+  { key: "r10", caseid: "PO-1002",  activity: "Receive Goods",   ts: "2024-01-19 14:22", src: "WMS",    bug: null },
+  { key: "r11", caseid: "PO-1002",  activity: "Process Payment", ts: "2024-01-19 09:48", src: "SAP-FI", bug: { type: "timezone", col: "ts" } },
+];
+
+const DETECTIVE_BUGS = {
+  "wrong-caseid": {
+    icon: "🔑", color: "#e74c3c", title: "Wrong Case ID Field",
+    description: "INV-8842 and INV-9103 are invoice numbers, not PO numbers. The invoice and its PO belong to the same process instance — but with different IDs, the mining tool treats them as completely separate cases. Your process map silently splits in two.",
+  },
+  "unmapped": {
+    icon: "❓", color: "#f4a261", title: "Unmapped Activity Code",
+    description: "FRGZU_08 is a raw SAP status code that was never mapped to a readable name. The dashboard will display this cryptic string to business stakeholders. This is exactly the scenario where a consultant on holiday stalls a project for two weeks.",
+  },
+  "timezone": {
+    icon: "🕐", color: "#e67e22", title: "Timezone Mismatch",
+    description: "PO-1002's Process Payment (09:48) appears before Receive Goods (14:22) on the same day — payment before delivery is impossible. SAP-FI logs in UTC while WMS logs in local time (UTC+3). The 3-hour offset creates ghost sequences that break conformance analysis.",
+  },
+};
+
+const TABLE_COLS = [
+  { key: "caseid", label: "Case ID" },
+  { key: "activity", label: "Activity" },
+  { key: "ts", label: "Timestamp" },
+  { key: "src", label: "Source" },
+];
+
+const Stage7 = ({ onComplete, stats }) => {
+  const [phase, setPhase] = useState("learn");
+  const [found, setFound] = useState(new Set());
+  const [flash, setFlash] = useState(null); // { key, col } — brief "nothing here" feedback
+  const [activeInfo, setActiveInfo] = useState(null); // bug type currently shown in panel
+
+  const handleCellClick = (row, col) => {
+    if (row.bug && row.bug.col === col) {
+      const next = new Set(found);
+      next.add(row.bug.type);
+      setFound(next);
+      setActiveInfo(row.bug.type);
+      stats.current.detectiveBugsFound = next.size;
+    } else {
+      setFlash({ key: row.key, col });
+      setActiveInfo(null);
+      setTimeout(() => setFlash(null), 700);
+    }
+  };
+
+  const allFound = found.size === 3;
+
+  if (phase === "learn") return (
+    <div style={{ animation: "fadeIn 0.4s ease" }}>
+      <h2 style={h2Style}>The Detective</h2>
+      <p style={introStyle}>
+        Even a well-architected pipeline can harbour silent data bugs. In this stage you play <strong style={{ color: "#f4a261" }}>data detective</strong> — inspect a raw event log and click on every cell that looks wrong. There are exactly <strong style={{ color: "#f4a261" }}>3 issues</strong> hidden in the table.
+      </p>
+
+      <LearnCard icon="🔍" title="The three classic silent killers">
+        <strong style={{ color: "#e8dcc8" }}>Wrong Case ID</strong> — using the invoice number instead of the PO number as the case identifier splits one process instance into multiple disconnected fragments.<br /><br />
+        <strong style={{ color: "#e8dcc8" }}>Unmapped activity codes</strong> — raw system codes like FRGZU_08 that were never translated make the dashboard incomprehensible to business users.<br /><br />
+        <strong style={{ color: "#e8dcc8" }}>Timezone mismatches</strong> — when two source systems log in different timezones, events appear in impossible order (payment before delivery, approval before creation).
+      </LearnCard>
+
+      <LearnCard icon="🎯" title="How to play">
+        Scan each row carefully. Click the specific cell you think contains an error. Non-buggy cells will flash green ("nothing wrong here"). Once you've identified all 3 issue types, you can proceed.
+      </LearnCard>
+
+      <div style={{ textAlign: "center", marginTop: 20 }}>
+        <PhaseButton onClick={() => setPhase("do")}>Open the case file →</PhaseButton>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ animation: "fadeIn 0.4s ease" }}>
+      <h2 style={h2Style}>Find the Bugs</h2>
+      <p style={introStyle}>
+        Click any cell that looks suspicious. Found: <strong style={{ color: "#f4a261" }}>{found.size} / 3</strong>
+      </p>
+
+      {/* Bug type badges */}
+      <div style={{ display: "flex", gap: 10, justifyContent: "center", marginBottom: 20, flexWrap: "wrap" }}>
+        {Object.entries(DETECTIVE_BUGS).map(([type, info]) => (
+          <div key={type} onClick={() => found.has(type) && setActiveInfo(activeInfo === type ? null : type)}
+            style={{
+              padding: "6px 14px", borderRadius: 20, userSelect: "none",
+              border: `1.5px solid ${found.has(type) ? info.color : "#252540"}`,
+              background: found.has(type) ? `${info.color}18` : "transparent",
+              fontFamily: "'DM Mono', monospace", fontSize: 11,
+              color: found.has(type) ? info.color : "#353555",
+              cursor: found.has(type) ? "pointer" : "default",
+              transition: "all 0.3s",
+            }}>
+            {found.has(type) ? "✓ " : "○ "}{info.icon} {info.title}
+          </div>
+        ))}
+      </div>
+
+      {/* Event log table */}
+      <div style={{ overflowX: "auto", marginBottom: 20, borderRadius: 10, border: "1.5px solid #1e1e38" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'DM Mono', monospace", fontSize: 12 }}>
+          <thead>
+            <tr style={{ background: "#0d0d1a" }}>
+              {TABLE_COLS.map(c => (
+                <th key={c.key} style={{
+                  padding: "9px 14px", textAlign: "left", fontSize: 10,
+                  color: "#4a4a6a", borderBottom: "1.5px solid #1e1e38",
+                  letterSpacing: 1, textTransform: "uppercase", fontWeight: 600,
+                }}>{c.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {BUGGY_LOG.map((row, ri) => (
+              <tr key={row.key} style={{ background: ri % 2 === 0 ? "rgba(255,255,255,0.015)" : "transparent" }}>
+                {TABLE_COLS.map(c => {
+                  const isBugCell = row.bug?.col === c.key;
+                  const isFound = isBugCell && found.has(row.bug.type);
+                  const isFlashing = flash?.key === row.key && flash?.col === c.key;
+                  const bugInfo = isBugCell ? DETECTIVE_BUGS[row.bug.type] : null;
+                  return (
+                    <td key={c.key} onClick={() => handleCellClick(row, c.key)} style={{
+                      padding: "9px 14px", borderBottom: "1px solid #161628",
+                      color: isFound ? bugInfo.color : isFlashing ? "#2ecc71" : "#b8c8d8",
+                      background: isFound ? `${bugInfo.color}14` : isFlashing ? "rgba(46,204,113,0.07)" : "transparent",
+                      cursor: "pointer", transition: "background 0.15s, color 0.15s",
+                    }}>
+                      {row[c.key]}{isFound && <span style={{ marginLeft: 6, fontSize: 10 }}>⚠</span>}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Info panel — shown when a bug badge or buggy cell is clicked */}
+      {activeInfo && (
+        <div style={{
+          background: `${DETECTIVE_BUGS[activeInfo].color}10`,
+          border: `1.5px solid ${DETECTIVE_BUGS[activeInfo].color}`,
+          borderRadius: 12, padding: "14px 18px", marginBottom: 20,
+          animation: "fadeIn 0.25s ease",
+        }}>
+          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 13, fontWeight: 700, color: DETECTIVE_BUGS[activeInfo].color, marginBottom: 6 }}>
+            {DETECTIVE_BUGS[activeInfo].icon} Bug found: {DETECTIVE_BUGS[activeInfo].title}
+          </div>
+          <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: "#c8c0b4", lineHeight: 1.65 }}>
+            {DETECTIVE_BUGS[activeInfo].description}
+          </div>
+        </div>
+      )}
+
+      {allFound && (
+        <div style={{ textAlign: "center", animation: "fadeIn 0.4s ease" }}>
+          <p style={{ color: "#2ecc71", fontFamily: "'DM Mono', monospace", fontSize: 13, marginBottom: 16 }}>
+            ✓ All 3 issues identified — the log is clean. Time to see the dashboard.
+          </p>
+          <PhaseButton onClick={onComplete}>Continue to Dashboard →</PhaseButton>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ─── SHARED STYLES ──────────────────────────────────────────────────
 const h2Style = { fontFamily: "'Playfair Display', serif", fontSize: 27, color: "#e8dcc8", textAlign: "center", marginBottom: 8 };
 const introStyle = { color: "#a89b8c", textAlign: "center", fontFamily: "'DM Sans', sans-serif", fontSize: 15, lineHeight: 1.65, marginBottom: 22, maxWidth: 640, marginLeft: "auto", marginRight: "auto" };
 const codeInline = { fontFamily: "'DM Mono', monospace", fontSize: 13, background: "rgba(244,162,97,0.1)", color: "#f4a261", padding: "1px 6px", borderRadius: 4 };
 
 // ═══════════════════════════════════════════════════════════════════
+// DATA FLOW ANIMATION — plays between stage transitions
+// ═══════════════════════════════════════════════════════════════════
+const PIPELINE_NODES = [
+  { icon: "🗄️", label: "Source Systems", sub: "ERP · Excel · Email", color: "#e76f51" },
+  { icon: "📋", label: "Event Log",       sub: "Case · Activity · Time", color: "#f4a261" },
+  { icon: "⚙️",  label: "Transform",      sub: "ETL · Map · Validate", color: "#2a9d8f" },
+  { icon: "📊", label: "Dashboard",       sub: "KPIs · Flow · Insights", color: "#a8d8ea" },
+];
+
+const TRANSITION_MESSAGES = {
+  1: "Identifying data sources...",
+  2: "Extracting records from source systems...",
+  3: "Building the event log...",
+  4: "Applying transformations & mappings...",
+  5: "Computing KPIs...",
+  6: "Validating data quality...",
+  7: "Preparing the detective case file...",
+};
+
+const DataFlowAnimation = ({ fromStage, onDone }) => {
+  useEffect(() => {
+    const t = setTimeout(onDone, 2800);
+    return () => clearTimeout(t);
+  }, [onDone]);
+
+  // Which node index is currently "active" (glowing), 0-indexed
+  const activeNode = Math.min(fromStage - 1, PIPELINE_NODES.length - 1);
+  const message = TRANSITION_MESSAGES[fromStage] || "Processing...";
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "#0d0d1a", zIndex: 100,
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      animation: "fadeIn 0.35s ease",
+    }}>
+      <p style={{
+        color: "#5a5a7a", fontFamily: "'DM Mono', monospace", fontSize: 12,
+        letterSpacing: 2, textTransform: "uppercase", marginBottom: 52,
+      }}>
+        {message}
+      </p>
+
+      {/* Pipeline row */}
+      <div style={{ display: "flex", alignItems: "center", maxWidth: 680, width: "100%", padding: "0 24px" }}>
+        {PIPELINE_NODES.map((node, i) => (
+          <React.Fragment key={node.label}>
+            {/* Node box */}
+            <div style={{
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+              animation: `pipelineFadeIn 0.45s ease ${i * 0.12}s both`,
+              flexShrink: 0,
+            }}>
+              <div style={{
+                width: 72, height: 72, borderRadius: 14,
+                background: i <= activeNode ? `${node.color}18` : "#161625",
+                border: `2px solid ${i <= activeNode ? node.color : "#252540"}`,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 26,
+                animation: i === activeNode ? "nodeGlow 1.6s ease-in-out infinite" : "none",
+                boxShadow: i === activeNode ? `0 0 18px ${node.color}55` : "none",
+                transition: "border-color 0.5s, background 0.5s",
+              }}>
+                {node.icon}
+              </div>
+              <span style={{
+                fontFamily: "'DM Mono', monospace", fontSize: 9, fontWeight: 700,
+                color: i <= activeNode ? node.color : "#333355",
+                textAlign: "center", letterSpacing: 0.5,
+              }}>{node.label}</span>
+              <span style={{
+                fontFamily: "'DM Sans', sans-serif", fontSize: 9,
+                color: "#363650", textAlign: "center",
+              }}>{node.sub}</span>
+            </div>
+
+            {/* Connector with animated particles */}
+            {i < PIPELINE_NODES.length - 1 && (
+              <div style={{
+                flex: 1, height: 2, position: "relative", marginBottom: 38,
+                background: i < activeNode
+                  ? `linear-gradient(90deg, ${PIPELINE_NODES[i].color}, ${PIPELINE_NODES[i + 1].color})`
+                  : "#1e1e38",
+                overflow: "hidden",
+                transition: "background 0.6s ease",
+              }}>
+                {/* Particles flow on the edge just before the active node */}
+                {i === activeNode - 1 && [0, 1, 2].map(p => (
+                  <div key={p} style={{
+                    position: "absolute", top: "50%", transform: "translateY(-50%)",
+                    width: 7, height: 7, borderRadius: "50%",
+                    background: PIPELINE_NODES[i + 1].color,
+                    boxShadow: `0 0 8px ${PIPELINE_NODES[i + 1].color}`,
+                    animation: `flowRight 1.3s linear ${p * 0.43}s infinite`,
+                  }} />
+                ))}
+              </div>
+            )}
+          </React.Fragment>
+        ))}
+      </div>
+
+      <button onClick={onDone} style={{
+        marginTop: 52, padding: "7px 18px", background: "transparent",
+        border: "1px solid #252540", borderRadius: 7, color: "#444466",
+        fontFamily: "'DM Mono', monospace", fontSize: 11, cursor: "pointer",
+        letterSpacing: 1, transition: "color 0.2s, border-color 0.2s",
+      }}
+        onMouseEnter={e => { e.currentTarget.style.color = "#f4a261"; e.currentTarget.style.borderColor = "#f4a261"; }}
+        onMouseLeave={e => { e.currentTarget.style.color = "#444466"; e.currentTarget.style.borderColor = "#252540"; }}
+      >
+        SKIP →
+      </button>
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════════════════════
 export default function App() {
   const [stage, setStage] = useState(1);
-  const stats = useRef({ issuesFound: 0, extractionAttempts: 0, caseIdFirstTry: false });
+  const [animating, setAnimating] = useState(false);
+  const [nextStage, setNextStage] = useState(null);
+  const stats = useRef({ issuesFound: 0, extractionAttempts: 0, caseIdFirstTry: false, detectiveBugsFound: 0 });
+
+  const advanceStage = useCallback((n) => {
+    setNextStage(n);
+    setAnimating(true);
+  }, []);
+
+  const handleAnimDone = useCallback(() => {
+    setStage(s => nextStage ?? s + 1);
+    setAnimating(false);
+    setNextStage(null);
+  }, [nextStage]);
 
   return (
     <div style={{ minHeight: "100vh", background: "#12121f", fontFamily: "'DM Sans', sans-serif", padding: "0 16px" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,400;0,500;0,700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
         @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pipelineFadeIn { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes nodeGlow { 0%, 100% { box-shadow: 0 0 8px rgba(244,162,97,0.15); } 50% { box-shadow: 0 0 24px rgba(244,162,97,0.55); } }
+        @keyframes flowRight { from { left: -8px; opacity: 0.9; } to { left: 100%; opacity: 0.4; } }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         button:hover { opacity: 0.88; }
         select { outline: none; }
@@ -1571,15 +1883,19 @@ export default function App() {
         ))}
       </div>
 
+      {/* Data flow transition overlay */}
+      {animating && <DataFlowAnimation fromStage={stage} onDone={handleAnimDone} />}
+
       {/* Content */}
       <div style={{ maxWidth: 780, margin: "0 auto", paddingBottom: 48, animation: "fadeIn 0.4s ease" }} key={stage}>
-        {stage === 1 && <Stage1 onComplete={() => setStage(2)} />}
-        {stage === 2 && <Stage2 onComplete={() => setStage(3)} stats={stats} />}
-        {stage === 3 && <Stage3 onComplete={() => setStage(4)} stats={stats} />}
-        {stage === 4 && <Stage4 onComplete={() => setStage(5)} stats={stats} />}
-        {stage === 5 && <Stage5 onComplete={() => setStage(6)} />}
-        {stage === 6 && <Stage6 onComplete={() => setStage(7)} />}
-        {stage === 7 && <Stage7 stats={stats} />}
+        {stage === 1 && <Stage1 onComplete={() => advanceStage(2)} />}
+        {stage === 2 && <Stage2 onComplete={() => advanceStage(3)} stats={stats} />}
+        {stage === 3 && <Stage3 onComplete={() => advanceStage(4)} stats={stats} />}
+        {stage === 4 && <Stage4 onComplete={() => advanceStage(5)} stats={stats} />}
+        {stage === 5 && <Stage5 onComplete={() => advanceStage(6)} />}
+        {stage === 6 && <Stage6 onComplete={() => advanceStage(7)} />}
+        {stage === 7 && <Stage7 onComplete={() => advanceStage(8)} stats={stats} />}
+        {stage === 8 && <Stage8 stats={stats} />}
       </div>
     </div>
   );
